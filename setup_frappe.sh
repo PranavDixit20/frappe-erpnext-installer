@@ -10,7 +10,7 @@ command_exists () {
 # Step 1: Prerequisite setup
 echo "Checking for prerequisites..."
 
-REQUIRED_CMDS=("git" "python3" "pip3" "node" "npm" "yarn" "redis-server" "bench" "mysql")
+REQUIRED_CMDS=("git" "python3" "pip3" "node" "npm" "yarn" "redis-server" "mysql")
 
 MISSING=false
 for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -31,14 +31,33 @@ if [ "$MISSING" = true ]; then
     curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
     sudo apt install -y nodejs
     sudo npm install -g yarn
-
-    # Bench CLI
-    pip3 install frappe-bench
 else
     echo "All prerequisites already installed."
 fi
 
-# Step 2: Configure MariaDB
+# Step 2: Install Bench CLI in virtual environment
+echo "Setting up Python virtual environment for bench CLI..."
+if [ ! -d "$HOME/.bench-venv" ]; then
+    python3 -m venv ~/.bench-venv
+fi
+
+source ~/.bench-venv/bin/activate
+pip install --upgrade pip setuptools
+pip install frappe-bench
+
+# Symlink bench to local bin if not already there
+mkdir -p ~/.local/bin
+ln -sf ~/.bench-venv/bin/bench ~/.local/bin/bench
+
+# Add to PATH in bashrc if missing
+if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+deactivate  # Done with virtualenv for now
+
+# Step 3: Configure MariaDB
 echo "Configuring MariaDB for Frappe..."
 
 sudo tee /etc/mysql/conf.d/frappe.cnf > /dev/null <<EOF
@@ -53,7 +72,7 @@ EOF
 
 sudo systemctl restart mariadb
 
-# Step 3: Create MariaDB user (if not exists)
+# Step 4: Create MariaDB user (if not exists)
 echo "Creating MariaDB user 'frappe'..."
 
 DB_USER_EXISTS=$(sudo mysql -uroot -e "SELECT User FROM mysql.user WHERE User = 'frappe';" | grep frappe || true)
@@ -67,31 +86,31 @@ else
     echo "User 'frappe' already exists."
 fi
 
-# Step 4: Ask for Frappe folder
+# Step 5: Ask for Frappe folder
 read -p "Enter Frappe folder name: " FOLDER
 
 if [ -d "$FOLDER" ]; then
     echo "Folder $FOLDER already exists. Skipping bench init."
 else
     echo "Creating Frappe bench at $FOLDER..."
-    bench init "$FOLDER" --frappe-branch version-15
+    ~/.bench-venv/bin/bench init "$FOLDER" --frappe-branch version-15
 fi
 
 cd "$FOLDER" || exit
 
-# Step 5: Create site
+# Step 6: Create site
 read -p "Enter site name (e.g., site.local): " SITENAME
-bench new-site "$SITENAME" --mariadb-root-password root --admin-password admin
+~/.bench-venv/bin/bench new-site "$SITENAME" --mariadb-root-password root --admin-password admin
 
-# Step 6: Get ERPNext app and install
+# Step 7: Get ERPNext app and install
 if [ ! -d "apps/erpnext" ]; then
-    bench get-app erpnext --branch version-15
+    ~/.bench-venv/bin/bench get-app erpnext --branch version-15
 fi
 
-bench --site "$SITENAME" install-app erpnext
+~/.bench-venv/bin/bench --site "$SITENAME" install-app erpnext
 
-# Step 7: Done
+# Step 8: Done
 echo "Setup complete!"
 echo "To start your server, run:"
-echo "cd $FOLDER && bench start"
+echo "cd $FOLDER && ~/.bench-venv/bin/bench start"
 echo "Then, access your site at http://$SITENAME"
